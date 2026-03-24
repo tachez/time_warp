@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
-    <title>Time Warp Scan - iOS Compatible</title>
+    <title>Time Warp Scan - iOS Fix</title>
     <style>
         * {
             margin: 0;
@@ -31,6 +31,8 @@
             display: flex;
             align-items: center;
             justify-content: center;
+            width: 100%;
+            height: 100vh;
         }
         
         canvas {
@@ -41,9 +43,21 @@
             height: 100%;
             display: block;
             background: #000;
+            object-fit: cover;
         }
         
-        /* Постоянная панель управления */
+        /* Видео элемент (скрытый, используется только как источник) */
+        #videoElement {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 1px;
+            height: 1px;
+            opacity: 0;
+            pointer-events: none;
+            z-index: -1;
+        }
+        
         .action-bar {
             position: fixed;
             bottom: 0;
@@ -90,17 +104,12 @@
             background: #2f3542;
         }
         
-        .action-btn.camera-select-btn {
-            background: #3498db;
-        }
-        
         .action-btn:disabled {
             opacity: 0.5;
             cursor: not-allowed;
             transform: none;
         }
         
-        /* Кнопка открытия настроек */
         .settings-toggle {
             position: fixed;
             bottom: 2vh;
@@ -127,7 +136,6 @@
             transform: scale(0.92);
         }
         
-        /* Выдвижная панель настроек */
         .settings-panel {
             position: fixed;
             bottom: 8vh;
@@ -192,11 +200,6 @@
             font-size: 0.85rem;
             font-family: monospace;
             font-weight: bold;
-        }
-        
-        .setting-group input:focus {
-            outline: none;
-            border-color: #ff4757;
         }
         
         .value-display {
@@ -306,20 +309,10 @@
         }
         
         @media (min-width: 768px) {
-            .scan-container {
-                margin: 0;
-                height: 100vh;
-            }
-            
             .settings-toggle {
                 left: 50%;
                 transform: translateX(-50%);
                 bottom: calc(8vh + 15px);
-            }
-            
-            .action-bar {
-                height: 8vh;
-                max-height: 80px;
             }
             
             .action-btn {
@@ -335,11 +328,6 @@
                 border-radius: 20px;
                 max-width: 500px;
                 margin: 0 auto;
-            }
-            
-            .status {
-                top: 20px;
-                font-size: 0.85rem;
             }
         }
         
@@ -358,42 +346,11 @@
                 left: 12px;
             }
             
-            .setting-group {
-                min-width: 120px;
-            }
-            
-            .settings-btn {
-                font-size: 0.75rem;
-                padding: 8px 14px;
-                min-width: 90px;
-            }
-            
             .status {
                 font-size: 0.65rem;
                 top: 10px;
                 white-space: normal;
                 max-width: 85%;
-            }
-            
-            .notification {
-                top: 70px;
-                font-size: 0.7rem;
-                white-space: normal;
-                max-width: 80%;
-                text-align: center;
-            }
-        }
-        
-        @media (max-width: 480px) {
-            .action-btn {
-                font-size: 0.7rem;
-                padding: 6px 10px;
-                max-width: 85px;
-            }
-            
-            .action-bar {
-                gap: 8px;
-                padding: 0 8px;
             }
         }
     </style>
@@ -402,6 +359,8 @@
     <div class="scan-container" id="scanContainer">
         <canvas id="viewfinderCanvas"></canvas>
     </div>
+    
+    <video id="videoElement" autoplay playsinline muted></video>
     
     <div class="status" id="statusMsg">📱 Нажмите "⚙️" и выберите камеру</div>
     <div id="scanIndicator" class="scan-indicator"></div>
@@ -443,6 +402,7 @@
             // Элементы
             const canvas = document.getElementById('viewfinderCanvas');
             const ctx = canvas.getContext('2d');
+            const videoElement = document.getElementById('videoElement');
             const scanContainer = document.getElementById('scanContainer');
             const captureBtn = document.getElementById('captureBtn');
             const resetBtn = document.getElementById('resetBtn');
@@ -461,18 +421,14 @@
             const speedValue = document.getElementById('speedValue');
             const rowHeightValue = document.getElementById('rowHeightValue');
             
-            // Видео элементы
-            let videoElement = null;
-            let videoStream = null;
-            
             // Состояние
+            let videoStream = null;
             let isScanning = false;
             let isScanComplete = false;
             let animationId = null;
             let renderAnimationId = null;
             let isCameraReady = false;
             let lastCapturedImage = null;
-            let currentFacingMode = 'user';
             
             // Параметры
             let scanSpeed = 1.25;
@@ -481,8 +437,6 @@
             let canvasWidth = 0;
             let canvasHeight = 0;
             let frozenBuffer = null;
-            
-            const isIOS = /iPhone|iPad|iPod/i.test(navigator.userAgent);
             
             function showNotification(message, isError = false) {
                 notification.textContent = isError ? `❌ ${message}` : `✅ ${message}`;
@@ -530,12 +484,28 @@
                 canvasHeight = rect.height;
                 canvas.width = canvasWidth;
                 canvas.height = canvasHeight;
-                
-                if (!isScanning && !isScanComplete && videoElement && videoElement.readyState >= 2 && videoElement.videoWidth > 0) {
+            }
+            
+            // Функция отрисовки видео на canvas
+            function drawVideoToCanvas() {
+                if (!isScanning && !isScanComplete && videoElement && videoElement.readyState >= 2 && videoElement.videoWidth > 0 && canvasWidth > 0) {
                     try {
                         ctx.drawImage(videoElement, 0, 0, canvasWidth, canvasHeight);
-                    } catch(e) {}
+                    } catch(e) {
+                        console.log("Draw error:", e);
+                    }
                 }
+            }
+            
+            // Запуск рендеринга
+            function startRenderLoop() {
+                if (renderAnimationId) cancelAnimationFrame(renderAnimationId);
+                
+                function render() {
+                    drawVideoToCanvas();
+                    renderAnimationId = requestAnimationFrame(render);
+                }
+                render();
             }
             
             async function initCamera(facingMode) {
@@ -544,10 +514,9 @@
                     videoStream = null;
                 }
                 
-                if (videoElement) {
-                    videoElement.pause();
-                    videoElement.srcObject = null;
-                }
+                // Останавливаем видео элемент
+                videoElement.pause();
+                videoElement.srcObject = null;
                 
                 updateStatus(`📷 Запрос ${facingMode === 'user' ? 'фронтальной' : 'основной'} камеры...`);
                 
@@ -556,31 +525,35 @@
                         video: {
                             width: { ideal: 1280 },
                             height: { ideal: 720 },
-                            facingMode: { exact: facingMode }
+                            facingMode: facingMode
                         }
                     };
                     
                     const stream = await navigator.mediaDevices.getUserMedia(constraints);
                     videoStream = stream;
-                    
-                    videoElement = document.createElement('video');
                     videoElement.srcObject = stream;
                     videoElement.setAttribute('playsinline', true);
                     videoElement.setAttribute('autoplay', true);
                     videoElement.muted = true;
                     
-                    await new Promise((resolve, reject) => {
-                        videoElement.onloadedmetadata = () => {
-                            console.log(`Video ready: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
-                            resolve();
+                    // Ждем загрузки видео
+                    await new Promise((resolve) => {
+                        const checkVideo = () => {
+                            if (videoElement.readyState >= 2 && videoElement.videoWidth > 0) {
+                                console.log(`Video ready: ${videoElement.videoWidth}x${videoElement.videoHeight}`);
+                                resolve();
+                            } else {
+                                setTimeout(checkVideo, 100);
+                            }
                         };
-                        videoElement.onerror = reject;
-                        videoElement.load();
+                        videoElement.play().then(() => {
+                            checkVideo();
+                        }).catch(e => {
+                            console.log("Play error:", e);
+                            checkVideo();
+                        });
                     });
                     
-                    await videoElement.play();
-                    
-                    currentFacingMode = facingMode;
                     isCameraReady = true;
                     captureBtn.disabled = false;
                     resetBtn.disabled = false;
@@ -589,59 +562,27 @@
                     showNotification(`Камера ${facingMode === 'user' ? 'фронтальная' : 'основная'} включена`);
                     
                     updateCanvasSize();
-                    startRenderLoop();
+                    
+                    // Принудительно отрисовываем первый кадр
+                    setTimeout(() => {
+                        drawVideoToCanvas();
+                    }, 100);
                     
                 } catch (err) {
                     console.error("Camera error:", err);
-                    
-                    // Пробуем без exact
-                    try {
-                        updateStatus("Пробуем альтернативный режим...");
-                        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                        videoStream = stream;
-                        videoElement = document.createElement('video');
-                        videoElement.srcObject = stream;
-                        videoElement.setAttribute('playsinline', true);
-                        videoElement.setAttribute('autoplay', true);
-                        videoElement.muted = true;
-                        
-                        await new Promise((resolve, reject) => {
-                            videoElement.onloadedmetadata = resolve;
-                            videoElement.onerror = reject;
-                            videoElement.load();
-                        });
-                        
-                        await videoElement.play();
-                        isCameraReady = true;
-                        captureBtn.disabled = false;
-                        resetBtn.disabled = false;
-                        updateStatus("✅ Камера готова!");
-                        updateCanvasSize();
-                        startRenderLoop();
-                        return;
-                    } catch (e) {
-                        console.error("Fallback error:", e);
+                    let errorMsg = "❌ Ошибка доступа к камере. ";
+                    if (err.name === 'NotAllowedError') {
+                        errorMsg += "Разрешите доступ к камере в браузере.";
+                    } else if (err.name === 'NotFoundError') {
+                        errorMsg += "Камера не найдена.";
+                    } else {
+                        errorMsg += err.message;
                     }
-                    
-                    updateStatus("❌ Не удалось включить камеру. Проверьте разрешения.", true);
+                    updateStatus(errorMsg, true);
                     captureBtn.disabled = true;
                     resetBtn.disabled = true;
                     isCameraReady = false;
                 }
-            }
-            
-            function startRenderLoop() {
-                if (renderAnimationId) cancelAnimationFrame(renderAnimationId);
-                
-                function render() {
-                    if (!isScanning && !isScanComplete && videoElement && videoElement.readyState >= 2 && videoElement.videoWidth > 0 && canvasWidth > 0) {
-                        try {
-                            ctx.drawImage(videoElement, 0, 0, canvasWidth, canvasHeight);
-                        } catch(e) {}
-                    }
-                    renderAnimationId = requestAnimationFrame(render);
-                }
-                render();
             }
             
             function saveImage() {
@@ -674,10 +615,7 @@
                 scanIndicator.style.display = "none";
                 saveBtn.disabled = true;
                 updateStatus("✅ Режим сброшен");
-                
-                if (videoElement && videoElement.readyState >= 2 && canvasWidth > 0) {
-                    ctx.drawImage(videoElement, 0, 0, canvasWidth, canvasHeight);
-                }
+                drawVideoToCanvas();
             }
             
             function startTimeWarpScan() {
@@ -691,8 +629,11 @@
                     return;
                 }
                 
+                updateCanvasSize();
+                
                 if (canvasWidth === 0 || canvasHeight === 0) {
-                    updateCanvasSize();
+                    updateStatus("⚠️ Ошибка размеров экрана");
+                    return;
                 }
                 
                 updateParameters();
@@ -719,6 +660,13 @@
                     if (!isScanning) return;
                     
                     try {
+                        if (!videoElement || videoElement.readyState < 2 || videoElement.videoWidth === 0) {
+                            scanIndicator.style.display = "none";
+                            updateStatus("❌ Потерян видеопоток", true);
+                            isScanning = false;
+                            return;
+                        }
+                        
                         const tempCanvas = document.createElement('canvas');
                         tempCanvas.width = width;
                         tempCanvas.height = height;
@@ -744,31 +692,23 @@
                         currentLine = nextLine;
                         
                         if (currentLine < height) {
-                            const frozenPart = ctx.createImageData(width, currentLine);
+                            // Рисуем замороженную часть
                             for (let row = 0; row < currentLine; row++) {
                                 const srcStart = row * width * 4;
-                                const dstStart = row * width * 4;
-                                for (let i = 0; i < width * 4; i++) {
-                                    frozenPart.data[dstStart + i] = frozenBuffer.data[srcStart + i];
-                                }
+                                const rowData = frozenBuffer.data.slice(srcStart, srcStart + width * 4);
+                                const imageData = new ImageData(new Uint8ClampedArray(rowData), width, 1);
+                                ctx.putImageData(imageData, 0, row);
                             }
-                            ctx.putImageData(frozenPart, 0, 0);
                             
-                            const livePart = ctx.createImageData(width, height - currentLine);
+                            // Рисуем живую часть
                             for (let row = currentLine; row < height; row++) {
                                 const srcStart = row * width * 4;
-                                const dstStart = (row - currentLine) * width * 4;
-                                for (let col = 0; col < width; col++) {
-                                    const srcPos = srcStart + col * 4;
-                                    const dstPos = dstStart + col * 4;
-                                    livePart.data[dstPos] = currentFrame.data[srcPos];
-                                    livePart.data[dstPos+1] = currentFrame.data[srcPos+1];
-                                    livePart.data[dstPos+2] = currentFrame.data[srcPos+2];
-                                    livePart.data[dstPos+3] = 255;
-                                }
+                                const rowData = currentFrame.data.slice(srcStart, srcStart + width * 4);
+                                const imageData = new ImageData(new Uint8ClampedArray(rowData), width, 1);
+                                ctx.putImageData(imageData, 0, row);
                             }
-                            ctx.putImageData(livePart, 0, currentLine);
                             
+                            // Линия сканирования
                             ctx.beginPath();
                             ctx.moveTo(0, currentLine);
                             ctx.lineTo(width, currentLine);
@@ -839,14 +779,10 @@
             });
             
             function handleResize() {
-                if (!isScanning && !isScanComplete) {
-                    updateCanvasSize();
+                updateCanvasSize();
+                if (!isScanning && !isScanComplete && isCameraReady) {
+                    drawVideoToCanvas();
                 } else if (isScanComplete && lastCapturedImage) {
-                    const rect = scanContainer.getBoundingClientRect();
-                    canvasWidth = rect.width;
-                    canvasHeight = rect.height;
-                    canvas.width = canvasWidth;
-                    canvas.height = canvasHeight;
                     const img = new Image();
                     img.onload = () => ctx.drawImage(img, 0, 0, canvasWidth, canvasHeight);
                     img.src = lastCapturedImage;
@@ -864,8 +800,10 @@
                 if (animationId) cancelAnimationFrame(animationId);
             });
             
+            // Инициализация
             updateCanvasSize();
             updateDisplayValues();
+            startRenderLoop();
             
             updateStatus("📱 Нажмите '⚙️' и выберите камеру");
             
